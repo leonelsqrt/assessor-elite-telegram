@@ -1,5 +1,5 @@
 import { editMessage, buildKeyboard, sendForceReply, deleteMessage } from '../../utils/telegram.js';
-import { setBotState, getLastMessageId, clearBotState } from '../../db/users.js';
+import { setBotState, getLastMessageId, clearBotState, updateBotStateData } from '../../db/users.js';
 import {
     createEventDraft,
     getActiveEventDraft,
@@ -15,7 +15,7 @@ import { createEvent, updateEvent, deleteEvent, getEventUrl } from '../../google
 import { isGoogleAuthenticated, getAuthUrl } from '../../google/auth.js';
 import { formatDate } from '../../utils/format.js';
 
-// Start event creation
+// Start event creation - immediately ask for title with ForceReply
 export async function handleCreateEvent(
     chatId: number,
     messageId: number,
@@ -27,13 +27,13 @@ export async function handleCreateEvent(
         const authUrl = getAuthUrl(userId);
         const text = `
 <b>🔐 Autorização Necessária</b>
-─────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Para criar eventos, preciso acessar seu Google Calendar.
 
 <i>Clique no botão abaixo para autorizar:</i>
 
-─────────────────────────`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
         const keyboard = buildKeyboard([
             [{ text: '🔑 Autorizar Google Calendar', url: authUrl }],
@@ -45,13 +45,19 @@ Para criar eventos, preciso acessar seu Google Calendar.
     }
 
     // Create new draft
-    const draft = await createEventDraft(userId, messageId);
+    await createEventDraft(userId, messageId);
 
-    // Show draft card
-    await showEventDraft(chatId, messageId, userId);
+    // Set state to await title
+    await setBotState(userId, 'event_title', { messageId });
+
+    // Immediately ask for title with ForceReply
+    const msg = await sendForceReply(chatId, '📝 Qual o título do evento?', 'Ex: Reunião com cliente');
+    if (msg) {
+        await updateBotStateData(userId, { promptMessageId: msg.message_id });
+    }
 }
 
-// Show event draft card (Card 1 - Rascunho)
+// Show event draft card (clean version - no missing fields list, no floating buttons)
 export async function showEventDraft(
     chatId: number,
     messageId: number,
@@ -60,73 +66,54 @@ export async function showEventDraft(
     const draft = await getActiveEventDraft(userId);
     if (!draft) return;
 
-    const missing = getMissingFields(draft);
-    const isReady = missing.length === 0;
-
     let text = `
-<b>📋 Rascunho do Evento</b>
-─────────────────────────
+<b>📅 NOVO EVENTO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📝 <b>Título:</b> ${draft.title || '<i>(Não definido)</i>'}
-📅 <b>Data:</b> ${draft.event_date ? formatDate(new Date(draft.event_date)) : '<i>(Não definido)</i>'}
+📝 <b>Título:</b> ${draft.title || '<i>─</i>'}
+📅 <b>Data:</b> ${draft.event_date ? formatDate(new Date(draft.event_date)) : '<i>─</i>'}
 `;
 
     if (draft.all_day) {
-        text += `🌙 <b>Dia Inteiro:</b> ON\n`;
+        text += `🌙 <b>Dia Inteiro:</b> Sim\n`;
     } else {
-        text += `🟢 <b>Início:</b> ${draft.start_time || '<i>(Não definido)</i>'}\n`;
-        text += `🔴 <b>Fim:</b> ${draft.end_time || '<i>(Não definido)</i>'}\n`;
+        text += `🟢 <b>Início:</b> ${draft.start_time || '<i>─</i>'}\n`;
+        text += `🔴 <b>Fim:</b> ${draft.end_time || '<i>─</i>'}\n`;
     }
 
-    text += `📍 <b>Local:</b> ${draft.location || '<i>(Não definido)</i>'}
+    text += `📍 <b>Local:</b> ${draft.location || '<i>─</i>'}
 
-─────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
 
-    if (!isReady) {
-        text += `<b>Para finalizar, falta só:</b>\n`;
-        missing.forEach(field => {
-            const emoji = getFieldEmoji(field);
-            const label = getFieldLabel(field);
-            text += `• ${emoji} ${label}\n`;
-        });
+    // Check if event is ready
+    const missing = getMissingFields(draft);
+    const isReady = missing.length === 0;
+
+    let keyboard;
+
+    if (isReady) {
+        // Show final buttons: Confirmar | Cancelar, then Editar below
+        keyboard = buildKeyboard([
+            [
+                { text: '✅ Confirmar', callback_data: 'event_confirm' },
+                { text: '❌ Cancelar', callback_data: 'event_cancel' },
+            ],
+            [
+                { text: '✏️ Editar', callback_data: 'event_edit' },
+            ],
+        ]);
     } else {
-        text += `<i>✅ Tudo pronto! Clique em Confirmar.</i>`;
+        // Just cancel button while filling
+        keyboard = buildKeyboard([
+            [{ text: '❌ Cancelar', callback_data: 'event_cancel' }],
+        ]);
     }
 
-    // Build buttons
-    const buttons: Array<Array<{ text: string; callback_data: string }>> = [];
-
-    if (!isReady) {
-        // Add insert buttons for missing fields (max 2 per row)
-        const insertButtons = missing.map(field => ({
-            text: `${getFieldEmoji(field)} Inserir ${getFieldLabel(field)}`,
-            callback_data: `event_${field}`,
-        }));
-
-        for (let i = 0; i < insertButtons.length; i += 2) {
-            buttons.push(insertButtons.slice(i, i + 2));
-        }
-
-        // All day toggle if time fields are missing
-        if (missing.includes('start') || missing.includes('end')) {
-            buttons.push([{
-                text: draft.all_day ? '🌙 Dia Inteiro: ON' : '🌙 Dia Inteiro: OFF',
-                callback_data: 'event_all_day'
-            }]);
-        }
-    } else {
-        // Ready - show confirm button
-        buttons.push([{ text: '✅ Confirmar', callback_data: 'event_confirm' }]);
-    }
-
-    // Always add cancel
-    buttons.push([{ text: '❌ Cancelar', callback_data: 'event_cancel' }]);
-
-    await editMessage(chatId, messageId, text, { replyMarkup: buildKeyboard(buttons) });
+    await editMessage(chatId, messageId, text, { replyMarkup: keyboard });
 }
 
-// Handle field input request (ForceReply)
+// Handle field input request (ForceReply) - called from text.ts after user responds
 export async function handleEventFieldInput(
     chatId: number,
     messageId: number,
@@ -135,11 +122,11 @@ export async function handleEventFieldInput(
     isEdit = false
 ): Promise<void> {
     const prompts: Record<string, { text: string; placeholder: string }> = {
-        title: { text: '📝 Digite o título do evento:', placeholder: 'Ex: Reunião com cliente' },
-        date: { text: '📅 Digite a data (dd/mm/aaaa):', placeholder: 'Ex: 15/02/2026' },
-        start: { text: '🟢 Digite o horário de início:', placeholder: 'Ex: 14:30' },
-        end: { text: '🔴 Digite o horário de fim:', placeholder: 'Ex: 16:00' },
-        location: { text: '📍 Digite o local:', placeholder: 'Ex: Escritório, Sala 302' },
+        title: { text: '📝 Qual o título do evento?', placeholder: 'Ex: Reunião com cliente' },
+        date: { text: '📅 Qual a data? (dd/mm/aaaa)', placeholder: 'Ex: 15/02/2026' },
+        start: { text: '🟢 Horário de início?', placeholder: 'Ex: 14:30' },
+        end: { text: '🔴 Horário de fim?', placeholder: 'Ex: 16:00' },
+        location: { text: '📍 Qual o local?', placeholder: 'Ex: Escritório, Sala 302' },
     };
 
     const prompt = prompts[field];
@@ -151,12 +138,64 @@ export async function handleEventFieldInput(
     // Send ForceReply
     const msg = await sendForceReply(chatId, prompt.text, prompt.placeholder);
     if (msg) {
-        // Store the prompt message ID so we can delete it later
-        await setBotState(userId, `event_${field}`, { messageId, promptMessageId: msg.message_id });
+        await updateBotStateData(userId, { promptMessageId: msg.message_id });
     }
 }
 
-// Toggle all day
+// Ask if event is all day (called after date is set)
+export async function askAllDay(
+    chatId: number,
+    messageId: number,
+    userId: number
+): Promise<void> {
+    const text = `
+<b>📅 NOVO EVENTO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+<i>Este evento é o dia inteiro?</i>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+    const keyboard = buildKeyboard([
+        [
+            { text: '✅ Sim, dia inteiro', callback_data: 'event_allday_yes' },
+            { text: '❌ Não', callback_data: 'event_allday_no' },
+        ],
+    ]);
+
+    await editMessage(chatId, messageId, text, { replyMarkup: keyboard });
+}
+
+// Handle all day response
+export async function handleAllDayResponse(
+    chatId: number,
+    messageId: number,
+    userId: number,
+    isAllDay: boolean
+): Promise<void> {
+    const draft = await getActiveEventDraft(userId);
+    if (!draft) return;
+
+    await updateEventDraft(draft.id, { all_day: isAllDay });
+
+    if (isAllDay) {
+        // Skip time fields, go directly to location
+        await setBotState(userId, 'event_location', { messageId });
+        const msg = await sendForceReply(chatId, '📍 Qual o local?', 'Ex: Escritório, Sala 302');
+        if (msg) {
+            await updateBotStateData(userId, { promptMessageId: msg.message_id });
+        }
+    } else {
+        // Ask for start time
+        await setBotState(userId, 'event_start', { messageId });
+        const msg = await sendForceReply(chatId, '🟢 Horário de início?', 'Ex: 14:30');
+        if (msg) {
+            await updateBotStateData(userId, { promptMessageId: msg.message_id });
+        }
+    }
+}
+
+// Toggle all day (for edit mode)
 export async function handleToggleAllDay(
     chatId: number,
     messageId: number,
@@ -166,7 +205,7 @@ export async function handleToggleAllDay(
     if (!draft) return;
 
     await updateEventDraft(draft.id, { all_day: !draft.all_day });
-    await showEventDraft(chatId, messageId, userId);
+    await showEventEdit(chatId, messageId, userId, draft);
 }
 
 // Confirm event creation
@@ -206,20 +245,20 @@ export async function handleConfirmEvent(
         // Update draft with message ID
         await updateEventDraft(draft.id, { message_id: messageId });
 
-        // Show success card (Card 2)
+        // Show success card
         await showEventCreated(chatId, messageId, userId, draft, eventId);
     } catch (error) {
         console.error('❌ Error creating event:', error);
 
         const text = `
 <b>❌ Erro ao Criar Evento</b>
-─────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Não foi possível criar o evento no Google Calendar.
 
 <i>Tente novamente ou verifique sua conexão.</i>
 
-─────────────────────────`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
         const keyboard = buildKeyboard([
             [{ text: '🔄 Tentar Novamente', callback_data: 'event_confirm' }],
@@ -230,7 +269,7 @@ Não foi possível criar o evento no Google Calendar.
     }
 }
 
-// Show created event card (Card 2)
+// Show created event card
 async function showEventCreated(
     chatId: number,
     messageId: number,
@@ -241,8 +280,8 @@ async function showEventCreated(
     const eventUrl = getEventUrl(eventId);
 
     let text = `
-<b>✅ Criado no Google Agenda!</b>
-─────────────────────────
+<b>✅ EVENTO CRIADO!</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📝 <b>Título:</b> ${draft.title}
 📅 <b>Data:</b> ${formatDate(new Date(draft.event_date!))}
@@ -256,12 +295,14 @@ async function showEventCreated(
 
     text += `📍 <b>Local:</b> ${draft.location}
 
-─────────────────────────`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<i>✨ Evento salvo no Google Agenda!</i>
+`;
 
     const keyboard = buildKeyboard([
         [
             { text: '✏️ Editar', callback_data: 'event_edit' },
-            { text: '❌ Cancelar', callback_data: 'event_cancel' },
+            { text: '❌ Excluir', callback_data: 'event_cancel' },
         ],
         [{ text: '📅 Abrir na Agenda', url: eventUrl }],
         [{ text: '↩️ Voltar ao Hub', callback_data: 'hub' }],
@@ -283,7 +324,7 @@ export async function handleEditEvent(
     await showEventEdit(chatId, messageId, userId, draft);
 }
 
-// Show edit card (Card 3)
+// Show edit card
 async function showEventEdit(
     chatId: number,
     messageId: number,
@@ -291,22 +332,22 @@ async function showEventEdit(
     draft: EventDraft
 ): Promise<void> {
     let text = `
-<b>✏️ Edição do Evento</b>
-─────────────────────────
+<b>✏️ EDITAR EVENTO</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📝 <b>Título:</b> ${draft.title}
 📅 <b>Data:</b> ${formatDate(new Date(draft.event_date!))}
 `;
 
     if (draft.all_day) {
-        text += `🌙 <b>Dia Inteiro:</b> ON\n`;
+        text += `🌙 <b>Dia Inteiro:</b> Sim\n`;
     } else {
         text += `⏰ <b>Horário:</b> ${draft.start_time} - ${draft.end_time}\n`;
     }
 
     text += `📍 <b>Local:</b> ${draft.location}
 
-─────────────────────────`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
     const keyboard = buildKeyboard([
         [{ text: '📝 Alterar Título', callback_data: 'edit_title' }],
@@ -385,44 +426,11 @@ export async function handleCancelEvent(
     await deleteEventDraft(draft.id);
 
     // Show cancellation message and go to hub
-    const text = `
-<b>❌ Evento Cancelado</b>
-─────────────────────────
-
-O evento foi removido.
-
-─────────────────────────`;
-
-    const keyboard = buildKeyboard([
-        [{ text: '↩️ Voltar ao Hub', callback_data: 'hub' }],
-    ]);
-
-    await editMessage(chatId, messageId, text, { replyMarkup: keyboard });
+    const { showHub } = await import('./start.js');
+    await showHub(chatId, messageId, userId);
 }
 
 // Helpers
-function getFieldEmoji(field: string): string {
-    const emojis: Record<string, string> = {
-        title: '📝',
-        date: '📅',
-        start: '🟢',
-        end: '🔴',
-        location: '📍',
-    };
-    return emojis[field] || '📌';
-}
-
-function getFieldLabel(field: string): string {
-    const labels: Record<string, string> = {
-        title: 'Título',
-        date: 'Data',
-        start: 'Início',
-        end: 'Fim',
-        location: 'Local',
-    };
-    return labels[field] || field;
-}
-
 function parseTimeString(time: string): { hours: number; minutes: number } {
     const [hours, minutes] = time.split(':').map(Number);
     return { hours, minutes };

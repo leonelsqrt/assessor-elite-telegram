@@ -8,7 +8,7 @@ import { formatDate } from '../utils/format.js';
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
 const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-pro-preview-05-06',
+    model: 'gemini-1.5-flash',
     safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },

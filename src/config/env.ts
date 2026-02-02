@@ -37,7 +37,7 @@ export const config = {
 
     // App Settings
     timezone: optionalEnv('TIMEZONE', 'America/Sao_Paulo'),
-    waterGoalMl: parseInt(optionalEnv('WATER_GOAL_ML', '2000'), 10),
+    waterGoalMl: parseInt(optionalEnv('WATER_GOAL_ML', '4000'), 10),
     idealSleepStart: optionalEnv('IDEAL_SLEEP_START', '23:00'),
     idealSleepEnd: optionalEnv('IDEAL_SLEEP_END', '07:00'),
 

@@ -1,10 +1,10 @@
-import { TelegramMessage, sendMessage, deleteMessage, editMessage, buildKeyboard } from '../../utils/telegram.js';
-import { getBotState, clearBotState, getLastMessageId, updateBotStateData } from '../../db/users.js';
+import { TelegramMessage, sendMessage, deleteMessage, editMessage, buildKeyboard, sendForceReply } from '../../utils/telegram.js';
+import { getBotState, clearBotState, getLastMessageId, updateBotStateData, setBotState } from '../../db/users.js';
 import { updateEventDraft, getActiveEventDraft } from '../../db/events.js';
 import { parseDate, parseTime, formatDate, formatTime } from '../../utils/format.js';
 import { processWithAI } from '../../ai/gemini.js';
 import { saveMemory } from '../../db/memory.js';
-import { showEventDraft } from './events.js';
+import { showEventDraft, askAllDay } from './events.js';
 import { logWater } from '../../db/health.js';
 import { showWaterCard } from './water.js';
 import { handleStart, showHub } from './start.js';
@@ -17,73 +17,78 @@ export async function handleTextMessage(message: TelegramMessage): Promise<void>
 
     if (!userId || !text) return;
 
+    // Delete user message for clean chat
+    await deleteMessage(chatId, message.message_id);
+
     // Check if we're in a state expecting input
     const state = await getBotState(userId);
 
     if (state.currentState) {
-        await handleStateInput(message, state);
+        await handleStateInput(chatId, userId, text, state);
         return;
     }
 
     // No active state - use AI to respond
-    await handleAIResponse(message);
+    await handleAIResponse(chatId, userId, text, message.from?.first_name || 'Usuário');
 }
 
 // Handle input based on current state
 async function handleStateInput(
-    message: TelegramMessage,
+    chatId: number,
+    userId: number,
+    text: string,
     state: { currentState: string | null; stateData: Record<string, any>; lastMessageId: number | null }
 ): Promise<void> {
-    const chatId = message.chat.id;
-    const userId = message.from!.id;
-    const text = message.text!.trim();
-
-    // Try to delete the user's message and the ForceReply prompt
+    // Delete the ForceReply prompt message
     if (state.stateData.promptMessageId) {
         await deleteMessage(chatId, state.stateData.promptMessageId);
     }
-    await deleteMessage(chatId, message.message_id);
+
+    const messageId = state.stateData.messageId || state.lastMessageId;
 
     switch (state.currentState) {
         case 'event_title':
-            await handleEventTitleInput(chatId, userId, text, state);
+            await handleEventTitleInput(chatId, userId, text, messageId);
             break;
         case 'event_date':
-            await handleEventDateInput(chatId, userId, text, state);
+            await handleEventDateInput(chatId, userId, text, messageId);
             break;
         case 'event_start':
-            await handleEventStartInput(chatId, userId, text, state);
+            await handleEventStartInput(chatId, userId, text, messageId);
             break;
         case 'event_end':
-            await handleEventEndInput(chatId, userId, text, state);
+            await handleEventEndInput(chatId, userId, text, messageId);
             break;
         case 'event_location':
-            await handleEventLocationInput(chatId, userId, text, state);
+            await handleEventLocationInput(chatId, userId, text, messageId);
             break;
         default:
             // Clear unknown state and respond with AI
             await clearBotState(userId);
-            await handleAIResponse(message);
+            await handleAIResponse(chatId, userId, text, 'Usuário');
     }
 }
 
-// Event field handlers
-async function handleEventTitleInput(chatId: number, userId: number, text: string, state: any): Promise<void> {
+// Event field handlers - Sequential flow
+async function handleEventTitleInput(chatId: number, userId: number, text: string, messageId: number): Promise<void> {
     const draft = await getActiveEventDraft(userId);
     if (!draft) {
         await clearBotState(userId);
         return;
     }
 
+    // Save title
     await updateEventDraft(draft.id, { title: text });
-    await clearBotState(userId);
 
-    if (state.lastMessageId) {
-        await showEventDraft(chatId, state.lastMessageId, userId);
+    // Clear state and ask for date
+    await setBotState(userId, 'event_date', { messageId });
+    const msg = await sendForceReply(chatId, '📅 Qual a data? (dd/mm/aaaa)', 'Ex: 15/02/2026');
+    if (msg) {
+        await updateBotStateData(userId, { promptMessageId: msg.message_id });
     }
 }
 
-async function handleEventDateInput(chatId: number, userId: number, text: string, state: any): Promise<void> {
+async function handleEventDateInput(chatId: number, userId: number, text: string, messageId: number): Promise<void> {
     const draft = await getActiveEventDraft(userId);
     if (!draft) {
         await clearBotState(userId);
@@ -93,24 +98,24 @@ async function handleEventDateInput(chatId: number, userId: number, text: string
     const date = parseDate(text);
     if (!date) {
         // Send error and ask again
-        const msg = await sendMessage(chatId, '❌ Data inválida. Use o formato dd/mm/aaaa (ex: 15/02/2026)', {
-            replyMarkup: { force_reply: true, input_field_placeholder: 'Ex: 15/02/2026' },
-        });
+        const msg = await sendForceReply(chatId, '❌ Data inválida. Use o formato dd/mm/aaaa', 'Ex: 15/02/2026');
         if (msg) {
             await updateBotStateData(userId, { promptMessageId: msg.message_id });
         }
         return;
     }
 
+    // Save date
     await updateEventDraft(draft.id, { event_date: date });
     await clearBotState(userId);
 
-    if (state.lastMessageId) {
-        await showEventDraft(chatId, state.lastMessageId, userId);
+    // Ask if it's all day (update the main card message)
+    if (messageId) {
+        await askAllDay(chatId, messageId, userId);
     }
 }
 
-async function handleEventStartInput(chatId: number, userId: number, text: string, state: any): Promise<void> {
+async function handleEventStartInput(chatId: number, userId: number, text: string, messageId: number): Promise<void> {
     const draft = await getActiveEventDraft(userId);
     if (!draft) {
         await clearBotState(userId);
@@ -119,24 +124,25 @@ async function handleEventStartInput(chatId: number, userId: number, text: strin
 
     const time = parseTime(text);
     if (!time) {
-        const msg = await sendMessage(chatId, '❌ Horário inválido. Use o formato HH:MM (ex: 14:30)', {
-            replyMarkup: { force_reply: true, input_field_placeholder: 'Ex: 14:30' },
-        });
+        const msg = await sendForceReply(chatId, '❌ Horário inválido. Use o formato HH:MM', 'Ex: 14:30');
         if (msg) {
             await updateBotStateData(userId, { promptMessageId: msg.message_id });
         }
         return;
     }
 
+    // Save start time
     await updateEventDraft(draft.id, { start_time: formatTime(time.hours, time.minutes) });
-    await clearBotState(userId);
 
-    if (state.lastMessageId) {
-        await showEventDraft(chatId, state.lastMessageId, userId);
+    // Ask for end time
+    await setBotState(userId, 'event_end', { messageId });
+    const msg = await sendForceReply(chatId, '🔴 Horário de fim?', 'Ex: 16:00');
+    if (msg) {
+        await updateBotStateData(userId, { promptMessageId: msg.message_id });
     }
 }
 
-async function handleEventEndInput(chatId: number, userId: number, text: string, state: any): Promise<void> {
+async function handleEventEndInput(chatId: number, userId: number, text: string, messageId: number): Promise<void> {
     const draft = await getActiveEventDraft(userId);
     if (!draft) {
         await clearBotState(userId);
@@ -145,45 +151,43 @@ async function handleEventEndInput(chatId: number, userId: number, text: string,
 
     const time = parseTime(text);
     if (!time) {
-        const msg = await sendMessage(chatId, '❌ Horário inválido. Use o formato HH:MM (ex: 16:00)', {
-            replyMarkup: { force_reply: true, input_field_placeholder: 'Ex: 16:00' },
-        });
+        const msg = await sendForceReply(chatId, '❌ Horário inválido. Use o formato HH:MM', 'Ex: 16:00');
         if (msg) {
             await updateBotStateData(userId, { promptMessageId: msg.message_id });
         }
         return;
     }
 
+    // Save end time
     await updateEventDraft(draft.id, { end_time: formatTime(time.hours, time.minutes) });
-    await clearBotState(userId);
 
-    if (state.lastMessageId) {
-        await showEventDraft(chatId, state.lastMessageId, userId);
+    // Ask for location
+    await setBotState(userId, 'event_location', { messageId });
+    const msg = await sendForceReply(chatId, '📍 Qual o local?', 'Ex: Escritório, Sala 302');
+    if (msg) {
+        await updateBotStateData(userId, { promptMessageId: msg.message_id });
     }
 }
 
-async function handleEventLocationInput(chatId: number, userId: number, text: string, state: any): Promise<void> {
+async function handleEventLocationInput(chatId: number, userId: number, text: string, messageId: number): Promise<void> {
     const draft = await getActiveEventDraft(userId);
     if (!draft) {
         await clearBotState(userId);
         return;
     }
 
+    // Save location
     await updateEventDraft(draft.id, { location: text });
     await clearBotState(userId);
 
-    if (state.lastMessageId) {
-        await showEventDraft(chatId, state.lastMessageId, userId);
+    // Show final draft with confirm/cancel/edit buttons
+    if (messageId) {
+        await showEventDraft(chatId, messageId, userId);
     }
 }
 
 // Handle AI-powered responses
-async function handleAIResponse(message: TelegramMessage): Promise<void> {
-    const chatId = message.chat.id;
-    const userId = message.from!.id;
-    const text = message.text!.trim();
-    const firstName = message.from?.first_name || 'Usuário';
-
+async function handleAIResponse(chatId: number, userId: number, text: string, firstName: string): Promise<void> {
     // Process with AI
     const response = await processWithAI(userId, text, firstName);
 

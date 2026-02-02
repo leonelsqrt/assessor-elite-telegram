@@ -1,5 +1,5 @@
 import { editMessage, buildKeyboard, sendMessage, deleteMessage } from '../../utils/telegram.js';
-import { showHub } from './start.js';
+import { showHub, showModules } from './start.js';
 import { showHealthCard } from './health.js';
 import { showWaterCard, logWaterConsumption, showWaterInsert } from './water.js';
 import { showSleepCard } from './sleep.js';
@@ -12,7 +12,8 @@ import {
     handleEditEvent,
     handleToggleAllDay,
     handleSaveEvent,
-    handleExitEdit
+    handleExitEdit,
+    handleAllDayResponse
 } from './events.js';
 import { setLastMessageId, setBotState, getBotState } from '../../db/users.js';
 
@@ -86,6 +87,12 @@ export async function handleCallback(
         case 'event_all_day':
             await handleToggleAllDay(chatId, messageId, userId);
             break;
+        case 'event_allday_yes':
+            await handleAllDayResponse(chatId, messageId, userId, true);
+            break;
+        case 'event_allday_no':
+            await handleAllDayResponse(chatId, messageId, userId, false);
+            break;
         case 'event_confirm':
             await handleConfirmEvent(chatId, messageId, userId);
             break;
@@ -122,6 +129,11 @@ export async function handleCallback(
         // No-op button (separator)
         case 'noop':
             // Do nothing - this is a separator button
+            break;
+
+        // Show modules
+        case 'show_modules':
+            await showModules(chatId, messageId, userId);
             break;
 
         default:
