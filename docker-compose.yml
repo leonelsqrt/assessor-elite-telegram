@@ -23,6 +23,22 @@ services:
       - "traefik.http.routers.elite-api.tls.certresolver=letsencrypt"
       - "traefik.http.services.elite-api.loadbalancer.server.port=3000"
 
+  elite-web:
+    build:
+      context: ./elite-web
+      dockerfile: Dockerfile
+    container_name: elite-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - elite-api
+    networks:
+      - n8n_default
+    # labels: 
+    #   - "traefik.enable=true" 
+    #   - "traefik.http.routers.elite-web.rule=Host(`app.lpanel.cloud`)" # Opcional futuro
+
   elite-postgres:
     image: postgres:16-alpine
     container_name: elite-postgres
@@ -35,7 +51,7 @@ services:
       - elite_data:/var/lib/postgresql/data
       - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d elite"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d elite" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -44,6 +60,7 @@ services:
 
 volumes:
   elite_data:
+
 
 networks:
   n8n_default:

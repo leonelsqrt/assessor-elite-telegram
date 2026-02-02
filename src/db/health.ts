@@ -173,6 +173,12 @@ export async function getWaterStats(userId: number): Promise<WaterStats | null> 
     };
 }
 
+// Compatibilidade com API
+export async function getDailyWater(userId: number, date: Date): Promise<{ amount: number }> {
+    const stats = await getWaterStats(userId);
+    return { amount: stats?.todayMl || 0 };
+}
+
 // Get weekly water data
 export async function getWeeklyWaterData(userId: number): Promise<Array<{
     date: Date;
