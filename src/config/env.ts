@@ -7,11 +7,11 @@ function requireEnv(key: string): string {
     if (!value) {
         throw new Error(`Missing required environment variable: ${key}`);
     }
-    return value;
+    return value.trim();
 }
 
 function optionalEnv(key: string, defaultValue: string): string {
-    return process.env[key] || defaultValue;
+    return (process.env[key] || defaultValue).trim();
 }
 
 export const config = {

@@ -6,8 +6,12 @@ import path from 'path';
 // Carregar .env manualmente para teste
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const apiKey = process.env.GEMINI_API_KEY;
-console.log('🔑 Testando API Key:', apiKey ? 'Encontrada (Inicio: ' + apiKey.substring(0, 8) + '...)' : 'NÃO ENCONTRADA');
+const rawKey = process.env.GEMINI_API_KEY || '';
+const apiKey = rawKey.trim();
+console.log(`🔑 Testando API Key: ${apiKey ? 'Encontrada' : 'NÃO ENCONTRADA'}`);
+console.log(`   - Comprimento: ${apiKey.length} chars`);
+console.log(`   - Início: ${apiKey.substring(0, 8)}...`);
+console.log(`   - Fim: ...${apiKey.substring(apiKey.length - 4)}`);
 
 if (!apiKey) {
     console.error('❌ ERRO: Adicione GEMINI_API_KEY no arquivo .env');
