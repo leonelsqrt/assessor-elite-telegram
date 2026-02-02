@@ -43,7 +43,7 @@ export const config = {
 
     // Gemini AI
     geminiApiKey: requireEnv('GEMINI_API_KEY'),
-    geminiModel: optionalEnv('GEMINI_MODEL', 'gemini-1.5-flash'),
+    geminiModel: optionalEnv('GEMINI_MODEL', 'gemini-pro'),
 } as const;
 
 export type Config = typeof config;

@@ -89,16 +89,16 @@ export async function processTextWithAI(text: string): Promise<AIAction> {
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: SYSTEM_PROMPT + `\n\nUSUÁRIO DIZ: "${text}"` }] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-      }
     });
 
     const responseText = result.response.text();
-    console.log('🤖 AI Response:', responseText);
+    console.log('🤖 AI Response Raw:', responseText);
+
+    // Limpar markdown se houver (gemini-pro gosta de ```json)
+    const jsonStr = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
 
     try {
-      return JSON.parse(responseText.trim());
+      return JSON.parse(jsonStr);
     } catch (e) {
       console.error('❌ Erro ao parsear JSON da IA:', e);
       return { type: 'chat', response: 'Desculpe, não consegui entender exatamente. Pode repetir?' };
