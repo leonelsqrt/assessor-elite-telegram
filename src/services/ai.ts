@@ -83,35 +83,49 @@ export type AIAction =
   | { type: 'health_water'; data: { amountMl: number }; response: string }
   | { type: 'chat'; response: string };
 
+const MODELS_TO_TRY = ['gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro'];
+
 export async function processTextWithAI(text: string): Promise<AIAction> {
-  try {
-    const model = genAI.getGenerativeModel({ model: config.geminiModel });
+  let lastError: any;
 
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: SYSTEM_PROMPT + `\n\nUSUÁRIO DIZ: "${text}"` }] }],
-    });
-
-    const responseText = result.response.text();
-    console.log('🤖 AI Response Raw:', responseText);
-
-    // Limpar markdown se houver (gemini-pro gosta de ```json)
-    const jsonStr = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-
+  for (const modelName of MODELS_TO_TRY) {
     try {
-      return JSON.parse(jsonStr);
-    } catch (e) {
-      console.error('❌ Erro ao parsear JSON da IA:', e);
-      return { type: 'chat', response: 'Desculpe, não consegui entender exatamente. Pode repetir?' };
+      console.log(`🤖 Tentando modelo IA: ${modelName}...`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: SYSTEM_PROMPT + `\n\nUSUÁRIO DIZ: "${text}"` }] }],
+      });
+
+      const responseText = result.response.text();
+      console.log(`🤖 Sucesso com ${modelName}! Response Raw:`, responseText);
+
+      // Limpar markdown se houver (gemini-pro gosta de ```json)
+      const jsonStr = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+
+      try {
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        console.error(`❌ Erro ao parsear JSON do modelo ${modelName}:`, e);
+        // Se falhar o JSON, mas a API funcionou, talvez não devamos tentar outro modelo de imediato, 
+        // mas para garantir, vamos assumir que o modelo foi burro e tentar o próximo se houver.
+        // Mas geralmente é melhor retornar erro de entendimento.
+        return { type: 'chat', response: 'Desculpe, não consegui entender exatamente. Pode repetir?' };
+      }
+
+    } catch (error: any) {
+      console.error(`❌ Falha com modelo ${modelName}:`, error.message);
+      lastError = error;
+      // Continua para o próximo modelo
     }
-
-  } catch (error: any) {
-    console.error('❌ Erro NEGOCIANDO com Gemini:', error);
-
-    // Log detalhado para debug
-    if (error.message) console.error('Error Message:', error.message);
-    if (error.status) console.error('Error Status:', error.status);
-    if (error.statusText) console.error('Error Status Text:', error.statusText);
-
-    return { type: 'chat', response: 'Estou com dificuldades de conexão com minha inteligência agora. Verifique os logs do servidor.' };
   }
+
+  // Se chegou aqui, todos falharam
+  console.error('❌ Todos os modelos de IA falharam.');
+  if (lastError?.status === 403 || lastError?.message?.includes('API key')) {
+    return { type: 'chat', response: '⚠️ Erro de permissão na API Key. Verifique se a chave é válida.' };
+  }
+
+  return { type: 'chat', response: 'Estou sem conexão com minha inteligência no momento. Tente novamente mais tarde.' };
 }
+
