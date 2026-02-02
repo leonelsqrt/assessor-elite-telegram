@@ -15,6 +15,9 @@ function App() {
     e.preventDefault();
     if (!input.trim()) return;
 
+    // Haptic feedback
+    if (navigator.vibrate) navigator.vibrate(10);
+
     setIsProcessing(true);
     try {
       // Enviar para o backend (usando o proxy do Vite em dev ou URL relativa em prod)
