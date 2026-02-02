@@ -17,8 +17,8 @@ const model = genAI.getGenerativeModel({
     ],
 });
 
-// System prompt que define a personalidade do Acessor Elite
-const SYSTEM_PROMPT = `Você é o ACESSOR ELITE, o assistente pessoal premium de Leonel.
+// System prompt que define a personalidade do Assessor Elite
+const SYSTEM_PROMPT = `Você é o ASSESSOR ELITE, o assistente pessoal premium de Leonel.
 
 🎯 SUA MISSÃO:
 Você conhece o Leonel melhor do que ele mesmo. Você é proativo, organizado e sempre focado em ajudá-lo a ser a melhor versão de si mesmo.
@@ -91,7 +91,7 @@ export async function processWithAI(
         const chat = model.startChat({
             history: [
                 { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-                { role: 'model', parts: [{ text: 'Entendido! Sou o Acessor Elite, pronto para servir o Leonel com excelência.' }] },
+                { role: 'model', parts: [{ text: 'Entendido! Sou o Assessor Elite, pronto para servir o Leonel com excelência.' }] },
             ],
         });
 

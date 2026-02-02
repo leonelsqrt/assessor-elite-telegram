@@ -17,7 +17,7 @@ export async function handleStart(chatId: number, userId: number): Promise<void>
 
     // Build welcome message
     let text = `
-<b>🧩 ACESSOR ELITE</b>
+<b>🧩 ASSESSOR ELITE</b>
 ─────────────────────────
 <i>Sua central de controle pessoal</i>
 
@@ -81,7 +81,7 @@ export async function showHub(chatId: number, messageId: number, userId: number)
     const waterStats = await getWaterStats(userId);
 
     let text = `
-<b>🧩 ACESSOR ELITE</b>
+<b>🧩 ASSESSOR ELITE</b>
 ─────────────────────────
 <i>Sua central de controle pessoal</i>
 

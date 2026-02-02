@@ -26,7 +26,7 @@ initBot();
 const server = app.listen(config.port, () => {
   console.log(`
 🧩 ═══════════════════════════════════════════════════════════
-   ACESSOR ELITE BOT
+   ASSESSOR ELITE BOT
    ───────────────────────────────────────────────────────────
    🚀 Server running on port ${config.port}
    🌍 Environment: ${config.nodeEnv}

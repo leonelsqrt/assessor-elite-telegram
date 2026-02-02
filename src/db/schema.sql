@@ -1,4 +1,4 @@
--- Acessor Elite Bot - Database Schema
+-- Assessor Elite Bot - Database Schema
 -- Timezone: America/Sao_Paulo
 
 -- Users table

@@ -5,7 +5,7 @@ export function setupHealthRoute(app: Express): void {
         res.json({
             status: 'ok',
             timestamp: new Date().toISOString(),
-            service: 'acessor-elite-bot',
+            service: 'assessor-elite-bot',
         });
     });
 }
