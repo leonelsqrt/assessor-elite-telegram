@@ -7,11 +7,13 @@ import {
     editMessage,
     answerCallback,
     isAllowedUser,
+    deleteMessage,
 } from '../utils/telegram.js';
 import { ensureUser, getBotState, clearBotState } from '../db/users.js';
 import { handleStart } from './handlers/start.js';
 import { handleCallback } from './handlers/callback.js';
 import { handleTextMessage } from './handlers/text.js';
+
 
 const TELEGRAM_API = `https://api.telegram.org/bot${config.telegramBotToken}`;
 
@@ -62,14 +64,20 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
 // Process message
 async function processMessage(message: TelegramMessage): Promise<void> {
     const userId = message.from?.id;
+    const chatId = message.chat.id;
+    const messageId = message.message_id;
+
     if (!userId) return;
 
     // Check allowlist
     if (!isAllowedUser(userId)) {
         console.log(`⚠️ Unauthorized user: ${userId}`);
-        await sendMessage(message.chat.id, '🚫 Acesso não autorizado.');
+        await sendMessage(chatId, '🚫 Acesso não autorizado.');
         return;
     }
+
+    // Delete user message immediately for clean chat
+    await deleteMessage(chatId, messageId);
 
     // Ensure user exists in DB
     await ensureUser(userId, message.from?.username, message.from?.first_name);
@@ -82,16 +90,17 @@ async function processMessage(message: TelegramMessage): Promise<void> {
 
         switch (command) {
             case '/start':
-                await handleStart(message.chat.id, userId);
+                await handleStart(chatId, userId);
                 return;
             default:
-                await sendMessage(message.chat.id, '❓ Comando não reconhecido. Use /start para voltar ao Hub.');
+                await sendMessage(chatId, '❓ Comando não reconhecido. Use /start para voltar ao Hub.');
                 return;
         }
     }
 
     // Handle text responses (for ForceReply flows)
     await handleTextMessage(message);
+
 }
 
 // Process callback query
